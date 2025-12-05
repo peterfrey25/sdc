@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Simulador de Lego 48x48</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --board-size: 48;
+      --cell-size: 18px;
+    }
+    .grid-board {
+      display: grid;
+      grid-template-columns: repeat(var(--board-size), var(--cell-size));
+      grid-template-rows: repeat(var(--board-size), var(--cell-size));
+      gap: 0;
+      transform-origin: top left;
+    }
+    .cell {
+      width: var(--cell-size);
+      height: var(--cell-size);
+      background: #f1f1f1;
+      border: 1px solid #ddd;
+      box-sizing: border-box;
+    }
+    .piece-preview {
+      display: grid;
+      box-sizing: border-box;
+      border-radius: 8px;
+      border: 2px solid #000;
+      box-shadow: inset 2px 2px 4px rgba(255,255,255,.6), inset -2px -2px 4px rgba(0,0,0,.4), 2px 2px 6px rgba(0,0,0,.4);
+    }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center p-6">
+
+  <h1 class="text-2xl font-bold mb-2 text-center">Louveira SDC Training</h1>
+  <p class="text-sm text-gray-600 mb-1 text-center">O DC mede 24m x 24m. (a distância de cada 'quadradinho é de 1/2m)</p>
+  <p class="text-sm text-gray-600 mb-4 text-center">Clique esquerdo: colocar peça • Clique direito: apagar peça inteira</p>
+
+  <div class="flex gap-8 w-full justify-center">
+    <!-- Painel de Peças -->
+    <div class="bg-white p-4 rounded-2xl shadow w-72">
+      <h2 class="font-semibold mb-3">Peças</h2>
+      <div id="palette" class="space-y-3"></div>
+    </div>
+
+    <!-- Tabuleiro -->
+    <div class="bg-white p-4 rounded-2xl shadow overflow-hidden max-w-[75vw]">
+      <div id="boardWrapper" class="relative w-full">
+        <div id="board" class="grid-board" role="grid" aria-label="Tabuleiro 48 por 48"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const BOARD_SIZE = 48;
+    const boardWrapper = document.getElementById('boardWrapper');
+    const board = document.getElementById('board');
+    const palette = document.getElementById('palette');
+
+    // ==============================
+    // DADOS DAS PEÇAS (com tamanhos)
+    // ==============================
+    const piecesData = [
+      { name: 'Amarelo', color: 'yellow', count: 10, w: 2, h: 2 },
+      { name: 'Preto', color: 'black', count: 20, w: 2, h: 2 },
+      { name: 'Azul', color: 'blue', count: 20, w: 2, h: 2 },
+      { name: 'Vermelho', color: 'red', count: 20, w: 2, h: 2 },
+      { name: 'Verde', color: 'green', count: 20, w: 2, h: 2 },
+      { name: 'Marrom', color: 'brown', count: 10, w: 2, h: 2 },
+      { name: 'Laranja', color: 'orange', count: 10, w: 2, h: 2 },
+      { name: 'Branca', color: 'white', count: 10, w: 2, h: 2 },
+
+      // >>> NOVAS PEÇAS PERSONALIZADAS <<<
+      { name: 'Stage', color: 'purple', count: 1, w: 48, h: 8 },       // Rocha
+      { name: 'Case Pick', color: 'pink', count: 1, w: 8, h: 48 },
+      { name: 'Customização', color: 'gray', count: 1, w: 14, h: 8 },
+    ];
+
+    const grid = [];
+    const boardState = Array(BOARD_SIZE * BOARD_SIZE).fill(null);
+    const pieceTypeById = {};
+    let pieceIdCounter = 1;
+
+    // Cria as células
+    for (let i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      board.appendChild(cell);
+      grid.push(cell);
+    }
+
+    let selectedPiece = null;
+
+    function renderPalette() {
+      palette.innerHTML = '';
+
+      piecesData.forEach((piece, index) => {
+        const container = document.createElement('div');
+        container.className = 'flex items-center gap-3 cursor-pointer select-none border p-2 rounded-lg hover:bg-gray-50';
+
+        const preview = document.createElement('div');
+        preview.className = 'piece-preview';
+        preview.style.background = piece.color;
+        preview.style.width = `${piece.w * 12}px`;
+        preview.style.height = `${piece.h * 12}px`;
+
+        if (piece.color === 'white') preview.style.border = '2px solid #000';
+
+        const info = document.createElement('div');
+        info.innerHTML = `
+          <div class="font-medium">${piece.name}</div>
+          <div class="text-xs">${piece.w} x ${piece.h}</div>
+          <div class="text-sm">Restantes: ${piece.count}</div>
+        `;
+
+        container.onclick = () => selectedPiece = index;
+
+        container.appendChild(preview);
+        container.appendChild(info);
+        palette.appendChild(container);
+      });
+    }
+
+    renderPalette();
+
+    function resetCell(i) {
+      grid[i].style.background = '';
+      grid[i].style.boxShadow = '';
+      grid[i].style.border = '1px solid #ddd';
+      grid[i].style.borderTop = '';
+      grid[i].style.borderRight = '';
+      grid[i].style.borderBottom = '';
+      grid[i].style.borderLeft = '';
+      boardState[i] = null;
+    }
+
+    function erasePieceById(pid) {
+      if (!pid) return;
+      const pieceType = pieceTypeById[pid];
+
+      boardState.forEach((val, i) => {
+        if (val === pid) resetCell(i);
+      });
+
+      if (pieceType !== undefined) {
+        piecesData[pieceType].count++;
+        delete pieceTypeById[pid];
+        renderPalette();
+      }
+    }
+
+    function applyOuterBorder(indices) {
+      const rows = indices.map(i => Math.floor(i / BOARD_SIZE));
+      const cols = indices.map(i => i % BOARD_SIZE);
+      const minR = Math.min(...rows);
+      const maxR = Math.max(...rows);
+      const minC = Math.min(...cols);
+      const maxC = Math.max(...cols);
+
+      indices.forEach(i => {
+        const r = Math.floor(i / BOARD_SIZE);
+        const c = i % BOARD_SIZE;
+
+        if (r === minR) grid[i].style.borderTop = '2px solid black';
+        if (r === maxR) grid[i].style.borderBottom = '2px solid black';
+        if (c === minC) grid[i].style.borderLeft = '2px solid black';
+        if (c === maxC) grid[i].style.borderRight = '2px solid black';
+      });
+    }
+
+    function getIndices(baseIndex, w, h) {
+      const baseRow = Math.floor(baseIndex / BOARD_SIZE);
+      const baseCol = baseIndex % BOARD_SIZE;
+      const result = [];
+
+      if (baseCol + w > BOARD_SIZE) return null;
+      if (baseRow + h > BOARD_SIZE) return null;
+
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = baseIndex + x + y * BOARD_SIZE;
+          result.push(idx);
+        }
+      }
+      return result;
+    }
+
+    grid.forEach((cell, index) => {
+      cell.addEventListener('click', () => {
+        if (selectedPiece === null) return;
+        const piece = piecesData[selectedPiece];
+        if (piece.count <= 0) return;
+
+        const indices = getIndices(index, piece.w, piece.h);
+        if (!indices) return;
+        if (indices.some(i => boardState[i] !== null)) return;
+
+        const newId = pieceIdCounter++;
+        pieceTypeById[newId] = selectedPiece;
+
+        indices.forEach(i => {
+          grid[i].style.background = piece.color;
+          grid[i].style.boxShadow = 'inset 2px 2px 4px rgba(255,255,255,.6), inset -2px -2px 4px rgba(0,0,0,.4), 2px 2px 4px rgba(0,0,0,.4)';
+          grid[i].style.border = '1px solid #ddd';
+          boardState[i] = newId;
+        });
+
+        applyOuterBorder(indices);
+        piece.count--;
+        renderPalette();
+      });
+
+      cell.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const pid = boardState[index];
+        if (!pid) return;
+        erasePieceById(pid);
+      });
+    });
+
+    // Ajustar zoom para caber na tela
+    function fitBoardToScreen() {
+      const boardWidth = BOARD_SIZE * 18;
+      const availableWidth = boardWrapper.clientWidth;
+      const scale = Math.min(1, availableWidth / boardWidth);
+      board.style.transform = `scale(${scale})`;
+    }
+
+    window.addEventListener('resize', fitBoardToScreen);
+    fitBoardToScreen();
+
+    // ==============================
+    // TESTES
+    // ==============================
+    console.assert(grid.length === BOARD_SIZE * BOARD_SIZE, 'Erro: quantidade de células incorreta');
+    console.assert(boardState.length === BOARD_SIZE * BOARD_SIZE, 'Erro: boardState com tamanho errado');
+    console.assert(piecesData.find(p => p.name === 'Stage').w === 24, 'Erro: Stage deve ter largura 24');
+    console.assert(piecesData.find(p => p.name === 'Case Pick').h === 20, 'Erro: Case Pick deve ter altura 20');
+  </script>
+</body>
+</html>
